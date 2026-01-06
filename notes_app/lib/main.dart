@@ -38,6 +38,7 @@ class MissingEnvApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Notes App',
+
       home: Scaffold(
         appBar: AppBar(title: const Text('Missing configuration')),
         body: const Center(
