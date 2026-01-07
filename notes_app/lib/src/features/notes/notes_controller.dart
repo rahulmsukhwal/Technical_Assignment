@@ -1,96 +1,150 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 
-import '../../core/providers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:get/get.dart';
+
+import '../auth/auth_controller.dart';
 import 'note.dart';
 import 'notes_repository.dart';
 
-final notesRepositoryProvider = Provider<NotesRepository>((ref) {
-  final client = ref.watch(supabaseClientProvider);
-  return NotesRepository(client);
-});
+class NotesController extends GetxController {
+  final NotesRepository _repository = NotesRepository(FirebaseFirestore.instance);
+  final AuthController _authController = Get.find<AuthController>();
 
-final notesSearchQueryProvider = StateProvider<String>((_) => '');
-
-final notesProvider =
-    AutoDisposeAsyncNotifierProvider<NotesNotifier, List<Note>>(
-  NotesNotifier.new,
-);
-
-class NotesNotifier extends AutoDisposeAsyncNotifier<List<Note>> {
-  NotesNotifier();
-
-  NotesRepository get _repository => ref.read(notesRepositoryProvider);
+  final RxList<Note> notes = <Note>[].obs;
+  final RxString searchQuery = ''.obs;
+  final RxBool isLoading = false.obs;
+  final Rx<String?> error = Rx<String?>(null);
+  
+  StreamSubscription<List<Note>>? _notesSubscription;
 
   @override
-  Future<List<Note>> build() async {
-    final session = await ref.watch(sessionProvider.future);
-    final userId = session?.user.id;
-    if (userId == null) return [];
-    return _repository.fetchNotes(userId);
+  void onInit() {
+    super.onInit();
+    // Load notes immediately if user is authenticated
+    if (_authController.currentUserId != null) {
+      loadNotes();
+    } else {
+      // Wait for auth state to be ready
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_authController.currentUserId != null) {
+          loadNotes();
+        }
+      });
+    }
   }
 
-  Future<void> refreshNotes() async {
-    final session = await ref.watch(sessionProvider.future);
-    final userId = session?.user.id;
+  @override
+  void onClose() {
+    _notesSubscription?.cancel();
+    super.onClose();
+  }
+
+  void loadNotes() {
+    final userId = _authController.currentUserId;
     if (userId == null) {
-      state = const AsyncData([]);
+      notes.clear();
       return;
     }
 
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() => _repository.fetchNotes(userId));
+    // Cancel existing subscription if any
+    _notesSubscription?.cancel();
+
+    // Set up new stream subscription with proper error handling
+    _notesSubscription = _repository.fetchNotesStream(userId).listen(
+      (notesList) {
+        // Update the reactive list - assignAll triggers UI rebuild
+        notes.assignAll(notesList);
+        error.value = null;
+        print('✅ Notes updated: ${notesList.length} notes');
+      },
+      onError: (e) {
+        error.value = 'Failed to load notes: $e';
+        print('❌ Notes stream error: $e');
+      },
+      cancelOnError: false, // Keep listening even on error
+    );
+    
+    print('🔵 Stream subscription started for user: $userId');
+  }
+  
+  void _loadNotes() => loadNotes();
+
+  Future<void> refreshNotes() async {
+    final userId = _authController.currentUserId;
+    if (userId == null) return;
+
+    isLoading.value = true;
+    try {
+      final notesList = await _repository.fetchNotes(userId);
+      notes.value = notesList;
+      error.value = null;
+    } catch (e) {
+      error.value = 'Failed to refresh notes: $e';
+    } finally {
+      isLoading.value = false;
+    }
   }
 
-  Future<String?> addNote(String title, String content) async {
-    final session = await ref.watch(sessionProvider.future);
-    final userId = session?.user.id;
-    if (userId == null) return 'No active user session';
+  Future<String?> createNote({
+    required String title,
+    required String content,
+  }) async {
+    final userId = _authController.currentUserId;
+    if (userId == null) return 'User not authenticated';
 
     try {
-      final newNote = await _repository.createNote(
+      await _repository.createNote(
         title: title,
         content: content,
         userId: userId,
       );
-      final current = state.value ?? [];
-      state = AsyncData([newNote, ...current]);
       return null;
     } catch (e) {
-      return e.toString();
+      return 'Failed to create note: $e';
     }
   }
 
-  Future<String?> updateNote(String id, String title, String content) async {
+  Future<String?> updateNote({
+    required String id,
+    required String title,
+    required String content,
+  }) async {
     try {
-      final updated = await _repository.updateNote(
+      await _repository.updateNote(
         id: id,
         title: title,
         content: content,
       );
-      final current = state.value ?? [];
-      state = AsyncData(
-        current
-            .map((note) => note.id == id ? updated : note)
-            .toList(growable: false),
-      );
       return null;
     } catch (e) {
-      return e.toString();
+      return 'Failed to update note: $e';
     }
   }
 
   Future<String?> deleteNote(String id) async {
     try {
       await _repository.deleteNote(id);
-      final current = state.value ?? [];
-      state = AsyncData(
-        current.where((note) => note.id != id).toList(growable: false),
-      );
       return null;
     } catch (e) {
-      return e.toString();
+      return 'Failed to delete note: $e';
     }
   }
+
+  List<Note> get filteredNotes {
+    if (searchQuery.value.isEmpty) {
+      return notes.toList();
+    }
+    final query = searchQuery.value.toLowerCase().trim();
+    if (query.isEmpty) {
+      return notes.toList();
+    }
+    return notes.where((note) {
+      return note.title.toLowerCase().contains(query) ||
+          note.content.toLowerCase().contains(query);
+    }).toList();
+  }
+  
+  bool get hasNotes => notes.isNotEmpty;
+  bool get hasSearchQuery => searchQuery.value.trim().isNotEmpty;
 }
-
-

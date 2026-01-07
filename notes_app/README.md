@@ -1,99 +1,174 @@
-# Notes App (Flutter + Supabase)
+# Notes App (Flutter + Firebase)
 
-A simple notes app demonstrating email/password auth, secure per-user CRUD, persisted sessions, and client-side search. Built with Flutter, Riverpod, and Supabase.
+A modern notes application with glassmorphic UI, built with Flutter, Firebase (Auth + Firestore), and GetX state management.
 
-## Tech
-- Flutter 3.35.x
-- Supabase (Auth + Postgres)
-- Riverpod for state management
+## Tech Stack
+- **Flutter** 3.35.x
+- **Firebase** (Authentication + Cloud Firestore)
+- **GetX** for state management
+- **Custom Glassmorphic UI** components
 
-## Project structure
-- `lib/main.dart` – bootstraps Supabase and env
-- `lib/src/app.dart` – app theming and root navigation
-- `lib/src/features/auth` – auth UI and controller
-- `lib/src/features/notes` – notes model, repo, controller, UI
-- `lib/src/core/providers.dart` – shared providers
+## Features
+- ✅ Email/password authentication (sign up, sign in, sign out)
+- ✅ **Google Sign-In** (Continue with Google)
+- ✅ Session persistence (user stays logged in after app restart)
+- ✅ Secure CRUD operations (Create, Read, Update, Delete notes)
+- ✅ **Real-time updates** via Firestore streams (instant UI updates)
+- ✅ Per-user data isolation (users can only access their own notes)
+- ✅ Client-side search by title and content
+- ✅ Modern glassmorphic UI design
+- ✅ Pull-to-refresh functionality
+
+## Project Structure
+```
+lib/
+├── main.dart                    # App entry point, Firebase initialization
+├── src/
+│   ├── app.dart                 # Root app widget with GetX setup
+│   ├── core/
+│   │   ├── glass_widget.dart    # Custom glassmorphic container widget
+│   │   └── providers.dart       # (Legacy - no longer used)
+│   └── features/
+│       ├── auth/
+│       │   ├── auth_controller.dart  # GetX controller for authentication
+│       │   ├── auth_page.dart        # Login/signup UI with glassmorphic design
+│       │   └── auth_gate.dart        # (Legacy - no longer used)
+│       └── notes/
+│           ├── note.dart             # Note data model
+│           ├── notes_repository.dart # Firestore operations
+│           ├── notes_controller.dart # GetX controller for notes
+│           ├── notes_page.dart       # Notes list UI with search
+│           └── note_editor_page.dart # Create/edit note UI
+```
 
 ## Prerequisites
 - Flutter SDK installed
-- Supabase project (free tier is fine)
+- Firebase project created
+- `google-services.json` file configured
 
-## Environment variables
-Create a `.env` file at the project root (already added to assets):
+## Firebase Setup
+
+### 1. Create Firebase Project
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Create a new project or use existing one
+3. Enable **Authentication** → **Email/Password** sign-in method
+4. Enable **Cloud Firestore Database**
+
+### 2. Add Android App
+1. In Firebase Console, go to Project Settings
+2. Add Android app with package name: `com.appcrewassignment.app`
+3. Download `google-services.json`
+4. Place it in `android/app/` directory (already done)
+
+### 3. Enable Google Sign-In (Optional)
+1. In Firebase Console, go to **Authentication** → **Sign-in method**
+2. Enable **Google** sign-in provider
+3. Add your app's SHA-1 fingerprint (for Android):
+   ```bash
+   # Get SHA-1
+   cd android
+   ./gradlew signingReport
+   # Copy SHA-1 from output and add to Firebase Console
+   ```
+4. Download updated `google-services.json` if needed
+
+### 4. Firestore Composite Index (REQUIRED)
+**Important**: The app requires a composite index for real-time updates to work.
+
+**Quick Fix**: Click the link from the error message when you run the app, or:
+
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Navigate to **Firestore Database** → **Indexes**
+3. Click **Create Index**
+4. Configure:
+   - Collection: `notes`
+   - Fields: `user_id` (Ascending), `updated_at` (Descending)
+5. Wait 2-5 minutes for index to build
+
+**Why needed**: The query combines `where` + `orderBy` on different fields, requiring a composite index. Without it, real-time streams fail and UI only updates after app restart.
+
+See `FIRESTORE_INDEX_FIX.md` for detailed instructions.
+
+### 5. Firestore Security Rules
+Set up security rules to ensure users can only access their own notes:
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /notes/{noteId} {
+      // Users can only read their own notes
+      allow read: if request.auth != null && request.auth.uid == resource.data.user_id;
+      
+      // Users can only create notes with their own user_id
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.user_id;
+      
+      // Users can only update their own notes
+      allow update: if request.auth != null && request.auth.uid == resource.data.user_id;
+      
+      // Users can only delete their own notes
+      allow delete: if request.auth != null && request.auth.uid == resource.data.user_id;
+    }
+  }
+}
 ```
-SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_ANON_KEY=your-public-anon-key
-```
-You can copy `.env` from the example values above.
 
-## Supabase setup
-1) Create a new Supabase project.  
-2) SQL for the `notes` table:
-```sql
-create table if not exists public.notes (
-  id uuid primary key default gen_random_uuid(),
-  title text not null,
-  content text not null,
-  created_at timestamp with time zone default timezone('utc', now()),
-  updated_at timestamp with time zone default timezone('utc', now()),
-  user_id uuid not null references auth.users(id) on delete cascade
-);
+### 4. Firestore Index
+Create a composite index for the notes query:
+- Collection: `notes`
+- Fields: `user_id` (Ascending), `updated_at` (Descending)
 
-create index if not exists notes_user_id_idx on public.notes(user_id);
-```
+## Running Locally
 
-3) Enable Row Level Security:
-```sql
-alter table public.notes enable row level security;
-```
-
-4) Policies (owner-only access):
-```sql
-create policy "Users can read own notes"
-  on public.notes for select
-  using (auth.uid() = user_id);
-
-create policy "Users can insert own notes"
-  on public.notes for insert
-  with check (auth.uid() = user_id);
-
-create policy "Users can update own notes"
-  on public.notes for update
-  using (auth.uid() = user_id);
-
-create policy "Users can delete own notes"
-  on public.notes for delete
-  using (auth.uid() = user_id);
-```
-
-## Running locally
 ```bash
+# Install dependencies
 flutter pub get
+
+# Run the app
 flutter run
-```
 
-## Building the APK (required)
-```bash
-flutter build apk --release
-# APK output: build/app/outputs/flutter-apk/app-release.apk
-```
-You can also build a debug APK:
-```bash
+# Build debug APK
 flutter build apk --debug
+
+# Build release APK
+flutter build apk --release
 ```
 
-## Features
-- Email/password sign up, sign in, sign out
-- Session persists across app restarts (Supabase auth)
-- CRUD notes with per-user isolation (RLS policies)
-- Client-side search by title
-- Pull-to-refresh list
+## Database Schema
 
-## Assumptions / trade-offs
-- Uses client-side search (acceptable per assignment)
-- No deep error messaging for Supabase setup; shows simple SnackBars
-- Offline handling not implemented; chose the search option
+### Firestore Collection: `notes`
+
+Each document contains:
+- `id` (document ID) - Auto-generated by Firestore
+- `title` (string) - Note title
+- `content` (string) - Note content
+- `user_id` (string) - Firebase Auth UID of the note owner
+- `created_at` (timestamp) - Creation timestamp
+- `updated_at` (timestamp) - Last update timestamp
+
+## Authentication Approach
+
+- Uses **Firebase Authentication** with email/password
+- Session persistence handled automatically by Firebase SDK
+- User state managed via GetX `AuthController` with reactive streams
+- Auth state changes trigger automatic UI updates
+
+## Assumptions & Trade-offs
+
+1. **Client-side search**: Search is performed on the client after fetching all user notes. For large datasets, consider server-side search.
+2. **No offline handling**: Chose search feature over offline handling as per assignment requirements.
+3. **Glassmorphic UI**: Custom implementation using `BackdropFilter` for blur effect and gradient overlays.
+4. **GetX over Riverpod**: Switched from Riverpod to GetX as requested, providing simpler state management and navigation.
+
+## Building APK
+
+The APK file will be located at:
+- Debug: `build/app/outputs/flutter-apk/app-debug.apk`
+- Release: `build/app/outputs/flutter-apk/app-release.apk`
 
 ## Troubleshooting
-- If you see “Missing configuration”, ensure `.env` exists and is added to assets in `pubspec.yaml`.
-- Verify Supabase URL and anon key are correct and RLS policies are applied.
+
+- **"Missing google-services.json"**: Ensure the file is in `android/app/` directory
+- **Firestore permission errors**: Check security rules are properly configured
+- **Build errors**: Run `flutter clean` and `flutter pub get`
+- **Authentication issues**: Verify Email/Password is enabled in Firebase Console

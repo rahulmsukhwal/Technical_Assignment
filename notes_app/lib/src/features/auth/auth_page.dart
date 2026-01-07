@@ -1,121 +1,212 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:get/get.dart';
 
+import '../../core/glass_widget.dart';
 import 'auth_controller.dart';
 
-class AuthPage extends ConsumerStatefulWidget {
+class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
 
   @override
-  ConsumerState<AuthPage> createState() => _AuthPageState();
+  State<AuthPage> createState() => _AuthPageState();
 }
 
-class _AuthPageState extends ConsumerState<AuthPage> {
+class _AuthPageState extends State<AuthPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
+  final _authController = Get.find<AuthController>();
 
-  bool _isLogin = true;
-  bool _isSubmitting = false;
+  bool _isSignUp = false;
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _showResendVerification = false;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
   }
 
   Future<void> _handleSubmit() async {
-    final auth = ref.read(authControllerProvider);
-
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isLoading = true;
+      _showResendVerification = false;
+    });
 
-    String? errorMessage;
-    if (_isLogin) {
-      errorMessage = await auth.signIn(
-        _emailController.text,
-        _passwordController.text,
-      );
-    } else {
-      if (_passwordController.text != _confirmPasswordController.text) {
-        errorMessage = 'Passwords do not match';
-      } else {
-        errorMessage = await auth.signUp(
-          _emailController.text,
-          _passwordController.text,
-        );
-      }
-    }
+    final error = _isSignUp
+        ? await _authController.signUp(
+            _emailController.text,
+            _passwordController.text,
+          )
+        : await _authController.signIn(
+            _emailController.text,
+            _passwordController.text,
+          );
 
     if (!mounted) return;
 
-    setState(() => _isSubmitting = false);
+    setState(() => _isLoading = false);
 
-    if (errorMessage != null) {
-      _showSnackBar(errorMessage);
-    } else if (!_isLogin) {
-      _showSnackBar('Account created. Check email to confirm if required.');
+    if (error != null) {
+      // Check if email is not verified
+      if (error == 'EMAIL_NOT_VERIFIED') {
+        setState(() => _showResendVerification = true);
+        Get.snackbar(
+          'Email Not Verified',
+          'Please verify your email before signing in. Check your inbox for the verification link.',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.orange.withOpacity(0.8),
+          colorText: Colors.white,
+          margin: const EdgeInsets.all(16),
+          duration: const Duration(seconds: 5),
+        );
+      } else {
+        Get.snackbar(
+          'Error',
+          error,
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.red.withOpacity(0.8),
+          colorText: Colors.white,
+          margin: const EdgeInsets.all(16),
+        );
+      }
+    } else if (_isSignUp) {
+      // Show success message for sign up
+      Get.snackbar(
+        'Sign Up Successful',
+        'Verification email sent! Please check your inbox and verify your email before signing in.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.green.withOpacity(0.8),
+        colorText: Colors.white,
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 5),
+      );
+      // Switch to sign in mode
       setState(() {
-        _isLogin = true;
-        _passwordController.clear();
-        _confirmPasswordController.clear();
+        _isSignUp = false;
       });
     }
   }
 
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+  Future<void> _handleResendVerification() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please enter both email and password',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+        margin: const EdgeInsets.all(16),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    final error = await _authController.resendVerificationEmail(
+      email,
+      password,
     );
+
+    if (!mounted) return;
+
+    setState(() => _isLoading = false);
+
+    if (error != null) {
+      Get.snackbar(
+        'Error',
+        error,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+        margin: const EdgeInsets.all(16),
+      );
+    } else {
+      Get.snackbar(
+        'Success',
+        'Verification email sent! Please check your inbox.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.green.withOpacity(0.8),
+        colorText: Colors.white,
+        margin: const EdgeInsets.all(16),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 500),
-            child: Card(
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(24),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Colors.indigo.shade400, Colors.indigo.shade500],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: GlassContainer(
+                width: double.infinity,
+                height: 500,
+                borderRadius: 20,
+                blur: 20,
+                border: 2,
+                padding: const EdgeInsets.all(32),
                 child: Form(
                   key: _formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        _isLogin ? 'Welcome back' : 'Create account',
-                        style: Theme.of(context).textTheme.headlineSmall,
+                      Icon(
+                        Icons.note_alt_rounded,
+                        size: 48,
+                        color: Colors.white.withOpacity(0.9),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
                       Text(
-                        _isLogin
-                            ? 'Sign in to continue'
-                            : 'Sign up with email and password',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        'AppCrew Notes App',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white.withOpacity(0.9),
+                        ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 18),
                       TextFormField(
                         controller: _emailController,
-                        decoration: const InputDecoration(
-                          labelText: 'Email',
-                          border: OutlineInputBorder(),
-                        ),
                         keyboardType: TextInputType.emailAddress,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: 'Email',
+                          labelStyle: TextStyle(
+                            color: Colors.white.withOpacity(0.7),
+                          ),
+                          prefixIcon: Icon(
+                            Icons.email_outlined,
+                            color: Colors.white.withOpacity(0.7),
+                          ),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.1),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Email is required';
+                            return 'Please enter your email';
                           }
                           if (!value.contains('@')) {
-                            return 'Enter a valid email';
+                            return 'Please enter a valid email';
                           }
                           return null;
                         },
@@ -123,14 +214,39 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _passwordController,
-                        decoration: const InputDecoration(
+                        obscureText: _obscurePassword,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
                           labelText: 'Password',
-                          border: OutlineInputBorder(),
+                          labelStyle: TextStyle(
+                            color: Colors.white.withOpacity(0.7),
+                          ),
+                          prefixIcon: Icon(
+                            Icons.lock_outlined,
+                            color: Colors.white.withOpacity(0.7),
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                              color: Colors.white.withOpacity(0.7),
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
+                          ),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.1),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
-                        obscureText: true,
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Password is required';
+                            return 'Please enter your password';
                           }
                           if (value.length < 6) {
                             return 'Password must be at least 6 characters';
@@ -138,42 +254,121 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                           return null;
                         },
                       ),
-                      if (!_isLogin) ...[
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _confirmPasswordController,
-                          decoration: const InputDecoration(
-                            labelText: 'Confirm password',
-                            border: OutlineInputBorder(),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _handleSubmit,
+                          child: _isLoading
+                              ? const CircularProgressIndicator()
+                              : Text(_isSignUp ? 'Sign Up' : 'Sign In'),
+                        ),
+                      ),
+                      if (!_isSignUp && _showResendVerification) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Colors.orange.withOpacity(0.5),
+                              width: 1,
+                            ),
                           ),
-                          obscureText: true,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please confirm your password';
-                            }
-                            return null;
-                          },
+                          child: Column(
+                            children: [
+                              Text(
+                                'Email not verified',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton(
+                                onPressed: _isLoading
+                                    ? null
+                                    : _handleResendVerification,
+                                child: Text(
+                                  'Resend Verification Email',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
-                      const SizedBox(height: 24),
-                      FilledButton(
-                        onPressed: _isSubmitting ? null : _handleSubmit,
-                        child: _isSubmitting
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Text(_isLogin ? 'Sign in' : 'Sign up'),
-                      ),
-                      const SizedBox(height: 12),
+                      if (!_isSignUp && !_showResendVerification) ...[
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: () async {
+                            final email = _emailController.text.trim();
+                            if (email.isEmpty || !email.contains('@')) {
+                              Get.snackbar(
+                                'Error',
+                                'Please enter a valid email address',
+                                snackPosition: SnackPosition.BOTTOM,
+                                backgroundColor: Colors.red.withOpacity(0.8),
+                                colorText: Colors.white,
+                                margin: const EdgeInsets.all(16),
+                              );
+                              return;
+                            }
+
+                            final error = await _authController.resetPassword(
+                              email,
+                            );
+                            if (!mounted) return;
+
+                            if (error != null) {
+                              Get.snackbar(
+                                'Error',
+                                error,
+                                snackPosition: SnackPosition.BOTTOM,
+                                backgroundColor: Colors.red.withOpacity(0.8),
+                                colorText: Colors.white,
+                                margin: const EdgeInsets.all(16),
+                              );
+                            } else {
+                              Get.snackbar(
+                                'Success',
+                                'Password reset email sent! Check your inbox.',
+                                snackPosition: SnackPosition.BOTTOM,
+                                backgroundColor: Colors.green.withOpacity(0.8),
+                                colorText: Colors.white,
+                                margin: const EdgeInsets.all(16),
+                              );
+                            }
+                          },
+                          child: Text(
+                            'Forgot Password?',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
                       TextButton(
-                        onPressed: _isSubmitting
-                            ? null
-                            : () => setState(() => _isLogin = !_isLogin),
-                        child: Text(_isLogin
-                            ? 'Need an account? Sign up'
-                            : 'Have an account? Sign in'),
+                        onPressed: () {
+                          setState(() => _isSignUp = !_isSignUp);
+                        },
+                        child: Text(
+                          _isSignUp
+                              ? 'Already have an account? Sign In'
+                              : 'Don\'t have an account? Sign Up',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -186,5 +381,3 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     );
   }
 }
-
-

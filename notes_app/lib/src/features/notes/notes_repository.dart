@@ -1,22 +1,33 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'note.dart';
 
 class NotesRepository {
-  NotesRepository(this._client);
+  NotesRepository(this._firestore);
 
-  final SupabaseClient _client;
-  static const _table = 'notes';
+  final FirebaseFirestore _firestore;
+  static const _collection = 'notes';
+
+  Stream<List<Note>> fetchNotesStream(String userId) {
+    return _firestore
+        .collection(_collection)
+        .where('user_id', isEqualTo: userId)
+        .orderBy('updated_at', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => Note.fromMap(doc.data(), doc.id))
+            .toList());
+  }
 
   Future<List<Note>> fetchNotes(String userId) async {
-    final response = await _client
-        .from(_table)
-        .select()
-        .eq('user_id', userId)
-        .order('updated_at', ascending: false);
+    final snapshot = await _firestore
+        .collection(_collection)
+        .where('user_id', isEqualTo: userId)
+        .orderBy('updated_at', descending: true)
+        .get();
 
-    return (response as List<dynamic>)
-        .map((row) => Note.fromMap(row as Map<String, dynamic>))
+    return snapshot.docs
+        .map((doc) => Note.fromMap(doc.data(), doc.id))
         .toList();
   }
 
@@ -25,13 +36,18 @@ class NotesRepository {
     required String content,
     required String userId,
   }) async {
-    final response = await _client.from(_table).insert({
+    final now = DateTime.now();
+    final noteData = {
       'title': title,
       'content': content,
       'user_id': userId,
-    }).select();
+      'created_at': Timestamp.fromDate(now),
+      'updated_at': Timestamp.fromDate(now),
+    };
 
-    return Note.fromMap((response as List).first as Map<String, dynamic>);
+    final docRef = await _firestore.collection(_collection).add(noteData);
+    final doc = await docRef.get();
+    return Note.fromMap(doc.data()!, doc.id);
   }
 
   Future<Note> updateNote({
@@ -39,22 +55,17 @@ class NotesRepository {
     required String title,
     required String content,
   }) async {
-    final response = await _client
-        .from(_table)
-        .update({
-          'title': title,
-          'content': content,
-          'updated_at': DateTime.now().toIso8601String(),
-        })
-        .eq('id', id)
-        .select();
+    await _firestore.collection(_collection).doc(id).update({
+      'title': title,
+      'content': content,
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
 
-    return Note.fromMap((response as List).first as Map<String, dynamic>);
+    final doc = await _firestore.collection(_collection).doc(id).get();
+    return Note.fromMap(doc.data()!, doc.id);
   }
 
   Future<void> deleteNote(String id) async {
-    await _client.from(_table).delete().eq('id', id);
+    await _firestore.collection(_collection).doc(id).delete();
   }
 }
-
-

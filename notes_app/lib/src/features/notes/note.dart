@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Note {
   const Note({
     required this.id,
@@ -30,16 +32,27 @@ class Note {
     );
   }
 
-  factory Note.fromMap(Map<String, dynamic> map) {
+  factory Note.fromMap(Map<String, dynamic> map, String id) {
+    final createdAt = map['created_at'] as Timestamp?;
+    final updatedAt = map['updated_at'] as Timestamp?;
+    
     return Note(
-      id: map['id'] as String,
+      id: id,
       title: map['title'] as String? ?? '',
       content: map['content'] as String? ?? '',
-      createdAt: DateTime.parse(map['created_at'] as String),
-      updatedAt: DateTime.parse(map['updated_at'] as String),
-      userId: map['user_id'] as String,
+      createdAt: createdAt?.toDate() ?? DateTime.now(),
+      updatedAt: updatedAt?.toDate() ?? DateTime.now(),
+      userId: map['user_id'] as String? ?? '',
     );
   }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'title': title,
+      'content': content,
+      'user_id': userId,
+      'created_at': Timestamp.fromDate(createdAt),
+      'updated_at': Timestamp.fromDate(updatedAt),
+    };
+  }
 }
-
-
